@@ -314,7 +314,7 @@ function genCondition(g, s, cfg) {
     case 'map': return lvl > cfg.server.minLvlMaps ? null : `level must be > ${cfg.server.minLvlMaps} (min_level_map_drops)`;
     case 'gem': return droppableGems(lvl, cfg).length ? null : 'no gem droppable at this level';
     case 'rune': return lvl > 10 ? null : 'level must be > 10';
-    case 'coin': return (s.inMap && s.prophecy > 0) ? null : 'only inside a map with prophecy affixes taken';
+    case 'coin': return s.chest ? 'mob kills only' : (s.inMap && s.prophecy > 0) ? null : 'only inside a map with prophecy affixes taken';
     case 'omen': return droppableOmens(lvl, cfg).length ? null : `no Codex droppable below level ${Math.ceil(cfg.server.maxLevel * Math.min(...POOLS.omens.map(o => o.lvl)))}`;
     case 'watcher': return s.chest ? 'mob kills only' : s.mobRar === 'uber' ? null : 'uber bosses only';
     case 'pinnacle': return s.chest ? 'mob kills only' : s.mobRar === 'pinnacle' ? null : 'pinnacle bosses only';
@@ -631,8 +631,7 @@ function simulateCore(s, cfg, maxItems) {
 
   const beforeCap = items.slice();
   const removed = [];
-  tries = 0;
-  while (items.length > maxItems && tries++ < 50) {
+  while (items.length > maxItems) {
     const idx = randInt(0, items.length - 1);
     const [it] = items.splice(idx, 1);
     it.removed = true; removed.push(it);
