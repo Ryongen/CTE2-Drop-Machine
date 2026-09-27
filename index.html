@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CTE2 Drop Machine</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <h1>CTE2 Drop Machine</h1>
+    <p>Kill a mob and watch Mine and Slash roll its loot, step by step.</p>
+  </div>
+  <div class="top-actions">
+    <span class="preset-tag" id="presetTag"></span>
+    <button class="btn ghost" id="openSettings">⚙ Server settings</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- Scenario -->
+  <aside class="panel scenario" id="scenario"></aside>
+
+  <section class="stage">
+
+    <!-- Machine -->
+    <div class="machine">
+      <div class="marquee">
+        <span class="bulbs"></span>
+        <span class="marquee-text" id="mobTitle">Common mob · Lv 60</span>
+        <span class="bulbs"></span>
+      </div>
+
+      <div class="reel-label">Normal drop rolls <small>(each type rolls on its own; no weight table between types)</small></div>
+      <div class="reels" id="reels"></div>
+
+      <div class="reel-label bonus">Bonus pool <small>(rolled after the cap, no loot modifiers)</small></div>
+      <div class="reels bonus-reels" id="bonusReels"></div>
+
+      <div class="controls">
+        <button class="lever" id="pull"><span>PULL</span><small>kill 1 mob</small></button>
+        <div class="control-side">
+          <button class="btn" id="pull10">Auto ×10</button>
+          <label class="check"><input type="checkbox" id="fast"> Skip animation</label>
+          <div class="session" id="session"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loot tray -->
+    <div class="panel tray">
+      <div class="tray-head">
+        <h2>Loot on the ground</h2>
+        <span class="tray-count" id="trayCount"></span>
+      </div>
+      <div class="loot" id="loot"><p class="empty">Pull the lever to kill a mob.</p></div>
+      <div class="discarded" id="discarded"></div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="panel tabs-panel">
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="steps" class="active">How this pull rolled</button>
+        <button role="tab" data-tab="odds">Odds sheet</button>
+        <button role="tab" data-tab="bulk">Bulk test</button>
+        <button role="tab" data-tab="rules">How drops work</button>
+      </nav>
+      <div class="tab-body" id="tab-steps"><p class="empty">Nothing rolled yet.</p></div>
+      <div class="tab-body" id="tab-odds" hidden></div>
+      <div class="tab-body" id="tab-bulk" hidden>
+        <div class="bulk-controls">
+          <button class="btn" data-bulk="1000">Simulate 1,000 kills</button>
+          <button class="btn" data-bulk="10000">Simulate 10,000 kills</button>
+          <span class="muted">Uses the current scenario and server settings.</span>
+        </div>
+        <div id="bulkOut"></div>
+      </div>
+      <div class="tab-body" id="tab-rules" hidden></div>
+    </div>
+  </section>
+</main>
+
+<!-- Settings dialog -->
+<dialog id="settings">
+  <form method="dialog" class="settings-inner">
+    <div class="settings-head">
+      <h2>Server settings</h2>
+      <button class="btn ghost" value="close" aria-label="Close">✕</button>
+    </div>
+    <p class="muted">These are the values that change between servers: <code>defaultconfigs/mine_and_slash-server.toml</code> and the rarity datapack JSON. Changes save in this browser.</p>
+    <div class="preset-row">
+      <button type="button" class="btn" data-preset="pack">Load CTE2 pack values</button>
+      <button type="button" class="btn ghost" data-preset="mod">Load Mine and Slash defaults</button>
+      <button type="button" class="btn ghost" id="exportCfg">Copy as JSON</button>
+      <button type="button" class="btn ghost" id="importCfg">Paste JSON…</button>
+    </div>
+    <div id="settingsBody"></div>
+  </form>
+</dialog>
+
+<!-- Atlas passive tree -->
+<dialog id="atlasDlg" class="atlas-dlg">
+  <div class="atlas-wrap">
+    <div class="atlas-view" id="atlasView">
+      <svg id="atlasSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div class="atlas-tip" id="atlasTip" hidden></div>
+      <div class="atlas-hint">Click a node to allocate or remove · drag to pan · scroll to zoom</div>
+    </div>
+    <aside class="atlas-side">
+      <div class="settings-head">
+        <h2>Atlas passive tree</h2>
+        <button class="btn ghost" id="atlasClose" aria-label="Close">✕</button>
+      </div>
+      <div class="atlas-points"><b id="atlasUsed">0</b> / <input type="number" id="atlasMax" min="0" step="1"> points</div>
+      <p class="muted small" id="atlasMaxNote"></p>
+      <label class="check"><input type="checkbox" id="atlasHighlight" checked> Highlight nodes that change drops</label>
+      <div class="preset-row">
+        <button class="btn ghost" id="atlasReset">Reset tree</button>
+        <button class="btn ghost" id="atlasFit">Fit view</button>
+      </div>
+      <h3>Drop stats from the atlas</h3>
+      <div id="atlasTotals"></div>
+      <h3>Other atlas stats</h3>
+      <p class="muted small">These change what spawns (events, bosses, pack size), not what a single kill drops, so the simulator only lists them.</p>
+      <div id="atlasOther"></div>
+    </aside>
+  </div>
+</dialog>
+
+<script src="pools.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
