@@ -262,3 +262,16 @@ td.tn { white-space: nowrap; }
 .atlas-summary { font-size: 12px; margin-top: 8px; }
 .atlas-summary .stat-line { font-size: 12px; }
 .plus { color: var(--ok); font-size: 11px; }
+
+.boss-reels { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 700px) { .boss-reels { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* chests */
+.chest-box { flex: 1 1 100%; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--bg2); }
+.chest-box h3 { font-size: 13px; margin: 0 0 8px; display: flex; gap: 8px; align-items: center; color: var(--gold2); }
+.chest-box h3 small { color: var(--muted); font-weight: 400; }
+.chest-steps > .body { padding-top: 8px; }
+.chest-steps .step { background: var(--panel); }
+table.lt { margin: 6px 0 10px; }
+table.lt td, table.lt th { padding: 3px 8px; }
+[hidden] { display: none !important; }

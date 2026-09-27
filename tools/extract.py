@@ -429,7 +429,56 @@ res["items"] = {
     "omen": {"name": item_name("mmorpg:omen"), "icon": icon("mmorpg:omen")},
     "chest": {r: icon(f"mmorpg:chest/{r}_gear") for r in ["common", "uncommon", "rare", "epic", "legendary", "mythic"]},
     "chestName": item_name("mmorpg:chest/common_gear"),
+    "uberFrag": {"name": item_name("dungeon_realm:uber_fragment"), "icon": icon("dungeon_realm:uber_fragment")},
+    "pinnacleFrag": {"name": item_name("dungeon_realm:pinnacle_fragment"), "icon": icon("dungeon_realm:pinnacle_fragment")},
+    "relic": {"name": item_name("dungeon_realm:general_relic"), "icon": icon("dungeon_realm:general_relic")},
 }
+# RelicGenerator: weighted relic rarity (base_data.weight) and weighted relic type
+res["relicRarities"] = [{"id": k, "w": (v.get("base_data") or {}).get("weight", 0), "affixes": v.get("affixes", 0)}
+                        for k, v in registry("library_of_exile_relic_rarity").items()]
+res["relicTypes"] = [{"id": k, "w": v.get("weight", 1000), "name": name(f"library_of_exile.relic_type.{k}", fallback=item_name(v["item_id"])), "icon": icon(v["item_id"])}
+                     for k, v in registry("library_of_exile_relic_type").items() if v.get("item_id")]
+
+# ------------------------------------------------------------------ chests: map finish rarities + vanilla loot tables
+
+res["finishRarities"] = sorted([{"id": k, "pct": v.get("perc_to_unlock", 0), "table": v.get("loot_table"), "chests": v.get("reward_chests", 0),
+                                 "multi": v.get("mns_loot_multi", 1), "tier": v.get("tier", 0)}
+                                for k, v in registry("library_of_exile_map_finish_rar").items()], key=lambda x: x["tier"])
+
+CHEST_ROOTS = [f"dungeon_realm:chests/tier_{i}_dungeon" for i in range(1, 6)] + [r["table"] for r in res["finishRarities"] if r["table"]]
+res["lootTables"] = {}
+loot_items = {}
+
+
+def walk_entry(e, todo):
+    t = e.get("type", "")
+    if t == "minecraft:loot_table":
+        todo.append(e["name"])
+    elif t == "minecraft:item":
+        loot_items.setdefault(e["name"], None)
+    for c in e.get("children", []):
+        walk_entry(c, todo)
+
+
+todo = list(CHEST_ROOTS)
+while todo:
+    tid = todo.pop()
+    if tid in res["lootTables"]:
+        continue
+    ns, path = tid.split(":", 1)
+    b = find(DATA, f"data/{ns}/loot_tables/{path}.json")
+    if b is None:
+        print("  loot table missing:", tid)
+        res["lootTables"][tid] = None
+        continue
+    table = load_json(b)
+    res["lootTables"][tid] = table
+    for pool in table.get("pools", []):
+        for e in pool.get("entries", []):
+            walk_entry(e, todo)
+res["lootItems"] = {iid: {"name": item_name(iid), "icon": icon(iid)} for iid in loot_items}
+print(f"chests: {len(res['finishRarities'])} finish rarities, {len(res['lootTables'])} loot tables, {len(res['lootItems'])} items")
+
 rar_json = registry("mmorpg_gear_rarity")
 res["rarityTier"] = {r: rar_json.get(r, {}).get("item_tier", 0) for r in rar_names}
 res["labels"] = {
@@ -477,6 +526,8 @@ def flatten(d, out):
     return out
 
 
+DUNGEON_KEYS = {"UBER_FRAG_DROP_RATE": "rates.uberFrag", "MAP_ITEM_FROM_BOSS_BASE_CHANCE": "rates.bossMap"}
+
 cfg_path = os.path.join(INST, "defaultconfigs", "mine_and_slash-server.toml")
 res["config"] = {"source": "defaultconfigs/mine_and_slash-server.toml", "values": {}}
 if os.path.exists(cfg_path):
@@ -489,6 +540,17 @@ if os.path.exists(cfg_path):
             print("  config key missing:", key)
 else:
     print("  no server config found at", cfg_path)
+
+dcfg_path = os.path.join(INST, "defaultconfigs", "dungeon_realm-server.toml")
+if os.path.exists(dcfg_path):
+    with open(dcfg_path, "rb") as f:
+        flat = flatten(tomllib.load(f), {})
+    for key, target in DUNGEON_KEYS.items():
+        if key in flat:
+            res["config"]["values"][target] = flat[key]
+        else:
+            print("  dungeon config key missing:", key)
+    res["config"]["source"] += " + defaultconfigs/dungeon_realm-server.toml"
 
 
 # ------------------------------------------------------------------ atlas passive tree
@@ -574,7 +636,7 @@ perk_db = {}
 for k, v in registry("mmorpg_perk").items():
     perk_db[(v.get("id") or k).lower()] = v
 
-LOOT_STATS = {"magic_find", "increased_quantity", "currency_find", "map_find", "gem_find", "rune_find", "jewel_find", "skill_gem_find",
+LOOT_STATS = {"uber_fragment_find", "relic_find", "duplicate_map_chance", "magic_find", "increased_quantity", "currency_find", "map_find", "gem_find", "rune_find", "jewel_find", "skill_gem_find",
               "omen_find", "watcher_eye_find", "prophecy_coin_find", "map_rarity_bias", "boss_loot_quantity", "extra_drop_from_mythics"}
 res["atlas"] = None
 if atlas_tree:

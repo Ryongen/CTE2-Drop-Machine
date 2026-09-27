@@ -11,7 +11,7 @@
 <header class="top">
   <div class="brand">
     <h1>CTE2 Drop Machine</h1>
-    <p>Kill a mob and watch Mine and Slash roll its loot, step by step.</p>
+    <p>Kill a mob or open a chest and watch Mine and Slash roll its loot, step by step.</p>
   </div>
   <div class="top-actions">
     <span class="preset-tag" id="presetTag"></span>
@@ -37,8 +37,11 @@
       <div class="reel-label">Normal drop rolls <small>(each type rolls on its own; no weight table between types)</small></div>
       <div class="reels" id="reels"></div>
 
-      <div class="reel-label bonus">Bonus pool <small>(rolled after the cap, no loot modifiers)</small></div>
+      <div class="reel-label bonus" id="bonusLabel">Bonus pool <small>(rolled after the cap, no loot modifiers)</small></div>
       <div class="reels bonus-reels" id="bonusReels"></div>
+
+      <div class="reel-label bonus" id="bossLabel">Dungeon boss rewards <small>(Dungeon Realm drops these itself when a boss dies)</small></div>
+      <div class="reels boss-reels" id="bossReels"></div>
 
       <div class="controls">
         <button class="lever" id="pull"><span>PULL</span><small>kill 1 mob</small></button>

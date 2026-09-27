@@ -44,14 +44,27 @@ const SPECIAL_GENS = [
   { key: 'pinnacle', label: 'Pinnacle Gem', icon: iconOf(POOLS.gems, g => g.id === 'ruby7'), rate: 'pinnacle', find: null, relic: 'gem', item: 'pinnacle', special: true },
 ];
 const img = (src, cls = 'ico') => src ? `<img class="${cls}" src="${src}" alt="" loading="lazy">` : '<span class="ico noimg">?</span>';
+// Dungeon Realm's own boss-kill rewards (DungeonEvents, LivingDeathEvent). Not part of MasterLootGen at all.
+const BOSS_GENS = [
+  { key: 'relic', label: 'Relics', icon: (POOLS.relicTypes.find(t => t.id === 'dungeon_realm') || {}).icon || IT.relic.icon, boss: true },
+  { key: 'uberFrag', label: IT.uberFrag.name, icon: IT.uberFrag.icon, boss: true },
+  { key: 'pinnacleFrag', label: IT.pinnacleFrag.name, icon: IT.pinnacleFrag.icon, boss: true },
+  { key: 'bossMap', label: 'Boss Map', icon: IT.map.icon, boss: true },
+];
 const ALL_GENS = [...GENS, ...SPECIAL_GENS];
-const GEN_BY_KEY = Object.fromEntries(ALL_GENS.map(g => [g.key, g]));
+// items from the chest's own vanilla loot table (not Mine and Slash)
+const VANILLA_GEN = { key: 'vanilla', label: 'Chest loot table', icon: IT.chest.common, vanilla: true };
+const GEN_BY_KEY = Object.fromEntries([...ALL_GENS, ...BOSS_GENS, VANILLA_GEN].map(g => [g.key, g]));
+const FINISH = Object.fromEntries(POOLS.finishRarities.map(f => [f.id, f]));
+const CHEST_MAX_ITEMS = 7; // LootInfo.ofChestLoot
+const CHEST_SLOTS = 27;
 
 const RATE_ROWS = [
   ['gear', 'gear_drop_rate'], ['soul', 'soul_drop_rate'], ['aura', 'aura_gem_drop_rate'], ['support', 'support_gem_drop_rate'],
   ['jewel', 'jewel_drop_rate'], ['currency', 'currency_drop_rate'], ['map', 'MAP_DROPRATE'], ['gem', 'gem_drop_rate'],
   ['rune', 'rune_drop_rate'], ['chest', 'loot_chest_drop_rate'], ['coin', 'PROPHECY_COIN_DROPRATE'], ['omen', 'OMEN_DROPRATE'],
   ['watcher', 'WATCHER_EYE_DROPRATE'], ['pinnacle', 'PINNACLE_GEM_DROPRATE'],
+  ['uberFrag', 'UBER_FRAG_DROP_RATE (dungeon_realm)'], ['bossMap', 'MAP_ITEM_FROM_BOSS_BASE_CHANCE (dungeon_realm)'],
 ];
 
 // ---------------------------------------------------------------- presets
@@ -76,7 +89,7 @@ const FAVOR = { common: 1, uncommon: 1.02, rare: 1.05, epic: 1.1, legendary: 1.1
 
 // Mine and Slash source defaults (ServerContainer + GearRaritiesAdder). The pack preset below starts from these and
 // overlays everything tools/extract.py read from the pack: the server toml, gear_rarity, mob_rarity and game balance JSON.
-const MOD_RATES = { gear: 7, soul: 0.3, aura: 2, support: 2, jewel: 0.25, currency: 1, map: 1, gem: 1, rune: 0.5, chest: 0.1, coin: 1, omen: 0.1, watcher: 33, pinnacle: 100 };
+const MOD_RATES = { gear: 7, soul: 0.3, aura: 2, support: 2, jewel: 0.25, currency: 1, map: 1, gem: 1, rune: 0.5, chest: 0.1, coin: 1, omen: 0.1, watcher: 33, pinnacle: 100, uberFrag: 10, bossMap: 20 };
 const MOD_SERVER = { maxItems: 20, minItems: 0, rollCap: 75, mfCap: 150, leeway: 2, perLvl: 0.2, minMulti: 0.2, party: 0.2, minLvlMaps: 25, mapFalloff: 5, mapRise: 1, bossFalloff: 0, bossRise: 3, maxLevel: 100 };
 
 function packPreset() {
@@ -111,6 +124,10 @@ const store = {
 
 let CFG = store.get('cte2dm.cfg') || clone(PRESETS.pack);
 if (!CFG.name) CFG = clone(PRESETS.pack);
+// settings saved by an older version may lack newer keys: fill them from the pack preset
+for (const grp of ['rates', 'server', 'gearRarities', 'mobRarities', 'favor']) {
+  CFG[grp] = { ...clone(PRESETS.pack[grp]), ...(CFG[grp] || {}) };
+}
 
 // ---------------------------------------------------------------- scenario schema
 
@@ -123,8 +140,22 @@ const LEAGUES = [
   { id: 'imprisoned_monster', label: 'Imprisoned Monster', ids: ['imprisoned_monster'] },
 ];
 
+const isChest = s => s.source && s.source !== 'mob';
+const SOURCES = [
+  ['mob', 'Kill a mob'],
+  ['mapChest', 'Open a chest inside a map'],
+  ['rewardChest', 'Open the reward room chests (map completed)'],
+  ['worldChest', 'Open a chest outside maps'],
+];
+
 const SCHEMA = [
-  { group: 'The mob', open: true, fields: [
+  { group: 'What are you looting?', open: true, fields: [
+    { id: 'source', label: 'Loot source', type: 'select', wide: true, options: () => SOURCES },
+    { id: 'finishRar', label: 'Map finish rarity', type: 'select', wide: true, showIf: s => s.source === 'rewardChest',
+      options: () => POOLS.finishRarities.map(f => [f.id, `${RAR_NAME[f.id] || pretty(f.id)} (${f.pct}%+ kills) · ${f.chests} chests · loot ×${f.multi}`]) },
+    { id: 'mobLevel', label: 'Area level', type: 'number', min: 1, max: 100, def: 60, showIf: isChest, help: 'the map / area level the chest rolls at' },
+  ] },
+  { group: 'The mob', open: true, showIf: s => !isChest(s), fields: [
     { id: 'mobRar', label: 'Mob rarity', type: 'select', wide: true, options: () => MOB_RARS.map(r => [r, `${MOB_NAME[r]}  (loot ×${CFG.mobRarities[r].loot})`]) },
     { id: 'mobLevel', label: 'Mob level', type: 'number', min: 1, max: 100, def: 60 },
     { id: 'mobHp', label: 'Mob base max HP', type: 'number', min: 1, def: 20, help: 'Zombie 20. Ignored for boss/uber/pinnacle (forced HP).' },
@@ -152,18 +183,22 @@ const SCHEMA = [
     { id: 'mapBias', label: 'Map rarity bias', type: 'number', def: 0, help: 'maps ignore normal MF', atlas: 'map_rarity_bias' },
     { id: 'bossLoot', label: 'Boss loot %', type: 'number', def: 0, help: 'boss mobs only', atlas: 'boss_loot_quantity' },
     { id: 'mythicLoot', label: 'Mythic mob loot %', type: 'number', def: 0, help: 'mythic mobs only', atlas: 'extra_drop_from_mythics' },
+    { id: 'find_uberfrag', label: 'Uber fragment find %', type: 'number', def: 0, help: 'final map boss only', atlas: 'uber_fragment_find' },
+    { id: 'find_relic', label: 'Relic find %', type: 'number', def: 0, help: 'extra relic roll per boss relic', atlas: 'relic_find' },
+    { id: 'dupeMap', label: 'Duplicate map chance %', type: 'number', def: 0, help: 'final map boss only', atlas: 'duplicate_map_chance' },
   ] },
   { group: 'Where', open: true, fields: [
-    { id: 'inMap', label: 'Killed inside a map', type: 'check', def: false },
-    { id: 'mapTier', label: 'Map tier', type: 'number', min: 0, max: 100, def: 20, showIf: s => s.inMap },
-    { id: 'finalBoss', label: "It's the map's final boss", type: 'check', def: false, showIf: s => s.inMap },
-    { id: 'rewardRoom', label: 'Reward-room multi', type: 'number', step: 0.1, def: 1, showIf: s => s.inMap, help: '1 = not in a reward room' },
-    { id: 'prophecy', label: 'Prophecy affixes taken', type: 'number', min: 0, def: 0, showIf: s => s.inMap },
+    { id: 'inMap', label: 'Killed inside a map', type: 'check', def: false, showIf: s => !isChest(s) },
+    { id: 'mapTier', label: 'Map tier', type: 'number', min: 0, max: 100, def: 20, showIf: s => inMapLike(s) },
+    { id: 'finalBoss', label: "It's the map's final boss", type: 'check', def: false, showIf: s => s.inMap && !isChest(s) },
+    { id: 'pinnacleUnlocked', label: 'Someone in the arena unlocked Pinnacle', type: 'check', def: false, showIf: s => s.mobRar === 'uber' },
+    { id: 'rewardRoom', label: 'Reward-room multi', type: 'number', step: 0.1, def: 1, showIf: s => s.inMap && !isChest(s), help: '1 = not in a reward room' },
+    { id: 'prophecy', label: 'Prophecy affixes taken', type: 'number', min: 0, def: 0, showIf: s => inMapLike(s) },
     { id: 'league', label: 'League', type: 'select', wide: true, options: () => LEAGUES.map(l => [l.id, l.label]) },
     { id: 'dimension', label: 'Dimension all_drop_multi', type: 'number', step: 0.1, def: 1 },
-    { id: 'antiFarm', label: 'Anti-mob-farm multi', type: 'number', step: 0.1, def: 1, showIf: s => !s.inMap, help: 'outside maps only' },
+    { id: 'antiFarm', label: 'Anti-mob-farm multi', type: 'number', step: 0.1, def: 1, showIf: s => !inMapLike(s), help: 'outside maps only' },
   ] },
-  { group: 'Map relic bonuses %', open: false, showIf: s => s.inMap, fields: [
+  { group: 'Map relic bonuses %', open: false, showIf: s => inMapLike(s), fields: [
     { id: 'relic_gear', label: 'Gear (+souls)', type: 'number', def: 0 },
     { id: 'relic_skillgem', label: 'Skill gems', type: 'number', def: 0 },
     { id: 'relic_currency', label: 'Currency', type: 'number', def: 0 },
@@ -175,11 +210,16 @@ const SCHEMA = [
     { id: 'relic_watcher', label: 'Abyssal Eye', type: 'number', def: 0 },
     { id: 'relic_coin', label: 'Prophecy coins', type: 'number', def: 0 },
     { id: 'relic_chest', label: 'Loot chests', type: 'number', def: 0 },
+    { id: 'relic_bossfrag', label: 'Boss fragment chance', type: 'number', def: 0, help: 'bonus_boss_frag_chance' },
+    { id: 'relic_bossmap', label: 'Map from boss chance', type: 'number', def: 0, help: 'adds flat % to the boss map' },
   ] },
 ];
 
+// chests in maps / the reward room are always inside a map
+function inMapLike(s) { return isChest(s) ? s.source !== 'worldChest' : s.inMap; }
+
 function defaultScenario() {
-  const s = { mobRar: 'common', favor: 'common', league: 'none' };
+  const s = { source: 'mob', finishRar: 'common', mobRar: 'common', favor: 'common', league: 'none' };
   for (const g of SCHEMA) for (const f of g.fields) if (f.def !== undefined) s[f.id] = f.def;
   return s;
 }
@@ -208,6 +248,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;',
 // ---------------------------------------------------------------- engine: loot modifiers
 
 function lootModifiers(s, cfg) {
+  if (s.chest) return chestModifiers(s, cfg);
   const mods = [];
   const add = (name, multi, why) => mods.push({ name, multi, why });
   const mob = cfg.mobRarities[s.mobRar];
@@ -240,22 +281,43 @@ function lootModifiers(s, cfg) {
   return { mods, product };
 }
 
+// LootInfo.ofChestLoot + gatherLootMultipliers with no mob: none of the mob modifiers exist for a chest
+function chestModifiers(s, cfg) {
+  const mods = [];
+  const add = (name, multi, why) => mods.push({ name, multi, why });
+  if (s.inMap) add('Map Chest', 10, 'any chest inside a map');
+  else add('Chest', 5, 'any chest outside maps');
+  if (s.source === 'rewardChest') {
+    const f = FINISH[s.finishRar];
+    add('Map Complete Rarity', f.multi, `${RAR_NAME[f.id] || pretty(f.id)} finish mns_loot_multi`);
+  }
+  if (s.party > 0) add('Party Bonus', 1 + Math.min(s.party, 3) * cfg.server.party, `+${cfg.server.party} per member, max 3`);
+  if (s.playerLevel < 10) add('Low Level', 2, 'you are under level 10');
+  add('Favor Rank', cfg.favor[s.favor], `${RAR_NAME[s.favor]} favor`);
+  add('Player Loot Quantity', 1 + s.iq / 100, 'Item Find (TreasureQuantity)');
+  add('Dimension Datapack', s.dimension, 'dimension all_drop_multi');
+  if (s.inMap) add('Adventure Map', 1 + s.mapTier * 0.02, `1 + tier ${s.mapTier} × 0.02`);
+  else add('Anti Mob Farm Mod', s.antiFarm, 'outside maps');
+  const product = mods.reduce((a, m) => a * m.multi, 1);
+  return { mods, product };
+}
+
 // ---------------------------------------------------------------- engine: per-generator chance
 
 function genCondition(g, s, cfg) {
   const lvl = s.mobLevel;
   switch (g.key) {
-    case 'aura': return lvl > 10 ? null : 'mob level must be > 10';
-    case 'support': return lvl > 5 ? null : 'mob level must be > 5';
-    case 'jewel': return lvl > 5 ? null : 'mob level must be > 5';
-    case 'currency': return lvl > 5 ? null : 'mob level must be > 5';
-    case 'map': return lvl > cfg.server.minLvlMaps ? null : `mob level must be > ${cfg.server.minLvlMaps} (min_level_map_drops)`;
+    case 'aura': return lvl > 10 ? null : 'level must be > 10';
+    case 'support': return lvl > 5 ? null : 'level must be > 5';
+    case 'jewel': return lvl > 5 ? null : 'level must be > 5';
+    case 'currency': return lvl > 5 ? null : 'level must be > 5';
+    case 'map': return lvl > cfg.server.minLvlMaps ? null : `level must be > ${cfg.server.minLvlMaps} (min_level_map_drops)`;
     case 'gem': return droppableGems(lvl, cfg).length ? null : 'no gem droppable at this level';
-    case 'rune': return lvl > 10 ? null : 'mob level must be > 10';
+    case 'rune': return lvl > 10 ? null : 'level must be > 10';
     case 'coin': return (s.inMap && s.prophecy > 0) ? null : 'only inside a map with prophecy affixes taken';
     case 'omen': return droppableOmens(lvl, cfg).length ? null : `no Codex droppable below level ${Math.ceil(cfg.server.maxLevel * Math.min(...POOLS.omens.map(o => o.lvl)))}`;
-    case 'watcher': return s.mobRar === 'uber' ? null : 'uber bosses only';
-    case 'pinnacle': return s.mobRar === 'pinnacle' ? null : 'pinnacle bosses only';
+    case 'watcher': return s.chest ? 'mob kills only' : s.mobRar === 'uber' ? null : 'uber bosses only';
+    case 'pinnacle': return s.chest ? 'mob kills only' : s.mobRar === 'pinnacle' ? null : 'pinnacle bosses only';
   }
   return null;
 }
@@ -549,6 +611,12 @@ function runGens(list, s, cfg, mods) {
 }
 
 function simulateKill(s, cfg) {
+  if (s.chest) return simulateChests(s, cfg);
+  return simulateCore(s, cfg, cfg.server.maxItems);
+}
+
+// MasterLootGen.generateLoot for one LootInfo (a mob kill, or one chest with maxItems 7)
+function simulateCore(s, cfg, maxItems) {
   const mods = lootModifiers(s, cfg);
   const first = runGens(GENS, s, cfg, mods);
   let items = first.items.slice();
@@ -564,7 +632,7 @@ function simulateKill(s, cfg) {
   const beforeCap = items.slice();
   const removed = [];
   tries = 0;
-  while (items.length > cfg.server.maxItems && tries++ < 50) {
+  while (items.length > maxItems && tries++ < 50) {
     const idx = randInt(0, items.length - 1);
     const [it] = items.splice(idx, 1);
     it.removed = true; removed.push(it);
@@ -575,7 +643,194 @@ function simulateKill(s, cfg) {
   const final = items.concat(special.items);
   final.forEach(it => { it.announce = it.rar === 'unique' || it.rar === 'mythic'; });
 
-  return { s, mods, rows: first.rows, specialRows: special.rows, beforeCap, removed, fillers, final };
+  const boss = bossRewards(s, cfg);
+  boss.items.forEach(it => { it.boss = true; it.announce = it.rar === 'unique' || it.rar === 'mythic'; });
+  final.push(...boss.items);
+
+  return { s, mods, maxItems, rows: first.rows, specialRows: special.rows, bossRows: boss.rows, beforeCap, removed, fillers, final };
+}
+
+// ---------------------------------------------------------------- engine: vanilla loot tables (chest contents)
+
+function intProvider(v) {
+  if (v === undefined || v === null) return 1;
+  if (typeof v === 'number') return Math.floor(v);
+  const t = v.type || (v.min !== undefined ? 'minecraft:uniform' : 'minecraft:constant');
+  if (t === 'minecraft:uniform') return randInt(Math.floor(v.min), Math.floor(v.max));
+  if (t === 'minecraft:binomial') { let k = 0; for (let i = 0; i < v.n; i++) if (Math.random() < v.p) k++; return k; }
+  if (t === 'minecraft:constant') return Math.floor(v.value);
+  return 1;
+}
+function condsPass(conds) {
+  for (const c of conds || []) {
+    if (c.condition === 'minecraft:random_chance' && Math.random() >= c.chance) return false;
+  }
+  return true; // other conditions (player/location checks) are treated as passing
+}
+
+// LootTable.getRandomItems: pools -> rolls -> weighted entry -> functions
+function rollLootTable(id, depth = 0) {
+  const t = POOLS.lootTables[id];
+  const out = [];
+  if (!t || depth > 8) return out;
+  for (const pool of t.pools || []) {
+    if (!condsPass(pool.conditions)) continue;
+    const rolls = intProvider(pool.rolls);
+    for (let i = 0; i < rolls; i++) {
+      const entries = (pool.entries || []).filter(e => condsPass(e.conditions));
+      const e = wpick(entries, x => x.weight ?? 1);
+      if (!e) continue;
+      out.push(...expandEntry(e, depth));
+    }
+  }
+  return out;
+}
+function expandEntry(e, depth) {
+  const type = e.type || '';
+  if (type === 'minecraft:empty') return [];
+  if (type === 'minecraft:loot_table') return rollLootTable(e.name, depth + 1).map(x => ({ ...x, via: e.name }));
+  if (type === 'minecraft:alternatives') { const c = (e.children || []).find(x => condsPass(x.conditions)); return c ? expandEntry(c, depth) : []; }
+  if (type === 'minecraft:group' || type === 'minecraft:sequence') return (e.children || []).flatMap(c => expandEntry(c, depth));
+  if (type !== 'minecraft:item') return [];
+  let count = 1, enchanted = false;
+  for (const f of e.functions || []) {
+    if (f.function === 'minecraft:set_count') count = (f.add ? count : 0) + intProvider(f.count);
+    if (f.function === 'minecraft:enchant_randomly' || f.function === 'minecraft:enchant_with_levels') enchanted = true;
+  }
+  if (count <= 0) return [];
+  const info = POOLS.lootItems[e.name] || { name: pretty(e.name.split(':')[1] || e.name) };
+  return [{ id: e.name, count, enchanted, name: info.name, icon: info.icon }];
+}
+
+function tableLabel(id) {
+  const m = /tier_(\d)_dungeon/.exec(id || '');
+  return m ? `Tier ${m[1]} dungeon chest` : pretty(id || 'none');
+}
+
+// Reward room / map chest: Mine and Slash fills the empty chest first (ChestLootGenMixin at the HEAD of
+// LootTable.fill), then vanilla fills the free slots. Vanilla stacks that don't fit are discarded.
+function simulateChests(s, cfg) {
+  let tables;
+  if (s.source === 'rewardChest') {
+    const f = FINISH[s.finishRar];
+    tables = Array.from({ length: f.chests }, () => f.table);
+  } else if (s.source === 'mapChest') {
+    tables = [`dungeon_realm:chests/tier_${randInt(1, 5)}_dungeon`];
+  } else {
+    tables = [null]; // a chest outside maps: its own structure loot table, not modelled
+  }
+  const chests = tables.map((table, idx) => {
+    const core = simulateCore(s, cfg, CHEST_MAX_ITEMS);
+    const vanilla = table ? rollLootTable(table) : [];
+    const free = CHEST_SLOTS - core.final.length;
+    // LootTable.fill shuffles the stacks; anything past the free slots is thrown away
+    const shuffled = vanilla.slice().sort(() => Math.random() - 0.5);
+    const kept = shuffled.slice(0, Math.max(0, free));
+    const lost = shuffled.slice(Math.max(0, free));
+    const vItems = kept.map(v => ({
+      gen: 'vanilla', icon: v.icon, rar: v.id.startsWith('mmorpg:runes') ? 'runeword' : 'other',
+      name: `${v.enchanted ? 'Enchanted ' : ''}${v.name}${v.count > 1 ? ' ×' + v.count : ''}`, detail: `chest table${v.via ? ' · ' + pretty(v.via.split(':')[1]) : ''}`, notes: [], vanilla: true,
+    }));
+    core.final.forEach(it => { it.chestNo = idx + 1; });
+    vItems.forEach(it => { it.chestNo = idx + 1; });
+    return { idx, table, core, vanilla, vItems, lost };
+  });
+  // aggregate rows across chests for the reels
+  const aggRows = key => chests[0].core[key].map((r, i) => ({ ...r, items: chests.flatMap(c => c.core[key][i].items), amount: chests.reduce((a, c) => a + c.core[key][i].amount, 0) }));
+  const rows = aggRows('rows');
+  const specialRows = aggRows('specialRows');
+  const final = chests.flatMap(c => [...c.core.final, ...c.vItems]);
+  const removed = chests.flatMap(c => c.core.removed);
+  return { s, chest: true, chests, mods: chests[0].core.mods, rows, specialRows, bossRows: [], removed, final, beforeCap: [], fillers: [] };
+}
+
+// ---------------------------------------------------------------- engine: Dungeon Realm boss rewards (DungeonEvents)
+
+// Which kind of boss this is, as DungeonEntityData sees it. Uber/pinnacle bosses live in their arena, which is a map.
+function bossKind(s) {
+  if (s.chest) return null;
+  if (s.mobRar === 'uber') return 'uber';
+  if (s.mobRar === 'pinnacle') return 'pinnacle';
+  if (s.inMap && s.finalBoss) return 'final';
+  return null;
+}
+
+function makeRelic() {
+  const rar = wpick(POOLS.relicRarities);
+  const type = wpick(POOLS.relicTypes);
+  return { gen: 'relic', icon: type.icon, rar: rar.id, name: `${RAR_NAME[rar.id] || pretty(rar.id)} ${type.name}`, detail: `${rar.affixes} affix${rar.affixes === 1 ? '' : 'es'}`, notes: [] };
+}
+
+function bossRewards(s, cfg) {
+  const kind = bossKind(s);
+  const rows = [];
+  const items = [];
+  const row = (key, steps, chance, chunks, gate, made) => {
+    const r = { g: GEN_BY_KEY[key], steps, chance, chunks, gate, amount: chunks.filter(c => c.ok).length, items: gate ? [] : made };
+    rows.push(r); items.push(...r.items);
+  };
+  const need = what => `only ${what}`;
+
+  // relics: 3 (+ a relic-find roll each) from uber/pinnacle bosses, 1 (+ roll) from the final map boss
+  {
+    const n = kind === 'uber' || kind === 'pinnacle' ? 3 : kind === 'final' ? 1 : 0;
+    const chunks = [], made = [];
+    for (let i = 0; i < n; i++) {
+      chunks.push({ c: 100, r: 0, ok: true }); made.push(makeRelic());
+      const r = roll(s.find_relic || 0);
+      chunks.push({ c: s.find_relic || 0, r: r.r, ok: r.ok });
+      if (r.ok) made.push(makeRelic());
+    }
+    row('relic', [{ label: 'guaranteed relics', v: n }], n * 100 + n * (s.find_relic || 0), chunks,
+      n ? null : need('map final boss, uber or pinnacle boss'), made);
+  }
+
+  // uber fragment: final map boss, one roll of UBER_FRAG_DROP_RATE x (1 + relic%) x (1 + uber fragment find%)
+  {
+    const base = cfg.rates.uberFrag;
+    const rel = 1 + (s.relic_bossfrag || 0) / 100, find = 1 + (s.find_uberfrag || 0) / 100;
+    const chance = base * rel * find;
+    const r = roll(chance);
+    const made = r.ok ? [{ gen: 'uberFrag', icon: IT.uberFrag.icon, rar: 'legendary', name: IT.uberFrag.name, detail: 'from the final map boss', notes: [] }] : [];
+    const steps = [{ label: 'base rate', v: base }];
+    if (rel !== 1) steps.push({ label: '× map relic', v: rel });
+    if (find !== 1) steps.push({ label: '× uber fragment find', v: find });
+    row('uberFrag', steps, chance, kind === 'final' ? [{ c: Math.min(chance, 100), r: r.r, ok: r.ok }] : [], kind === 'final' ? null : need("the map's final boss"), made);
+  }
+
+  // pinnacle fragment: guaranteed from an uber boss once anyone in the arena finished the atlas pinnacle branch
+  {
+    const ok = kind === 'uber' && s.pinnacleUnlocked;
+    const gate = kind !== 'uber' ? need('uber bosses (not pinnacle bosses)') : !s.pinnacleUnlocked ? 'nobody in the arena has unlocked Pinnacle on the atlas' : null;
+    row('pinnacleFrag', [{ label: 'guaranteed', v: 100 }], 100, kind === 'uber' ? [{ c: 100, r: 0, ok }] : [], gate,
+      ok ? [{ gen: 'pinnacleFrag', icon: IT.pinnacleFrag.icon, rar: 'mythic', name: IT.pinnacleFrag.name, detail: 'from the uber boss', notes: [] }] : []);
+  }
+
+  // boss map: MAP_ITEM_FROM_BOSS_BASE_CHANCE + relic, every whole 100 guaranteed, remainder rolled; boss tier band
+  {
+    const chance = cfg.rates.bossMap + (s.relic_bossmap || 0);
+    const chunks = [], made = [];
+    if (kind === 'final') {
+      const mk = () => { const it = makeItem(GEN_BY_KEY.map, { ...s, finalBoss: true }, cfg); it.gen = 'bossMap'; it.detail = 'boss map · boss tier band'; return it; };
+      for (let i = 0; i < Math.floor(chance / 100); i++) { chunks.push({ c: 100, r: 0, ok: true }); made.push(mk()); }
+      const rem = chance % 100;
+      if (rem > 0) { const r = roll(rem); chunks.push({ c: rem, r: r.r, ok: r.ok }); if (r.ok) made.push(mk()); }
+      // duplicate map: exact copy of the run map, killer's duplicate_map_chance
+      if ((s.dupeMap || 0) > 0) {
+        const r = roll(s.dupeMap);
+        chunks.push({ c: s.dupeMap, r: r.r, ok: r.ok, dupe: true });
+        if (r.ok) {
+          const rar = rarityForTier(s.mapTier, cfg.gearRarities);
+          made.push({ gen: 'bossMap', icon: IT.map.icon, rar, name: `${RAR_NAME[rar]} ${IT.map.name} · T${s.mapTier}`, detail: 'duplicate of the map you ran', notes: [] });
+        }
+      }
+    }
+    const steps = [{ label: 'base chance', v: cfg.rates.bossMap }];
+    if (s.relic_bossmap) steps.push({ label: '+ map relic', v: s.relic_bossmap });
+    row('bossMap', steps, chance, chunks, kind === 'final' ? null : need("the map's final boss"), made);
+  }
+
+  return { kind, rows, items };
 }
 
 // ---------------------------------------------------------------- atlas passive tree
@@ -587,6 +842,7 @@ const ATLAS_FIELD = {
   rune_find: 'find_rune', jewel_find: 'find_jewel', skill_gem_find: 'find_skillgem', omen_find: 'find_omen',
   watcher_eye_find: 'find_watcher', prophecy_coin_find: 'find_coin', map_rarity_bias: 'mapBias',
   boss_loot_quantity: 'bossLoot', extra_drop_from_mythics: 'mythicLoot',
+  uber_fragment_find: 'find_uberfrag', relic_find: 'find_relic', duplicate_map_chance: 'dupeMap',
 };
 let ATLAS_ON = new Set((store.get('cte2dm.atlas') || []).filter(i => ATLAS && i < ATLAS.nodes.length));
 let ATLAS_MAX = store.get('cte2dm.atlasMax') ?? (ATLAS ? ATLAS.maxPoints : 0);
@@ -607,6 +863,12 @@ function atlasTotals() {
 // The scenario with atlas stats added on top of the manual values.
 function effective() {
   const s = { ...SCN };
+  if (isChest(s)) {
+    s.chest = true;
+    s.inMap = s.source !== 'worldChest';
+    s.finalBoss = false;
+    s.rewardRoom = 1;
+  }
   const t = atlasTotals();
   for (const [stat, f] of Object.entries(ATLAS_FIELD)) if (t[stat]) s[f] = (s[f] || 0) + t[stat];
   return s;
@@ -882,7 +1144,17 @@ function buildScenario() {
 }
 
 function onScenarioChange() {
-  $('#mobTitle').textContent = `${MOB_NAME[SCN.mobRar]} mob · Lv ${SCN.mobLevel}${SCN.inMap ? ` · Map T${SCN.mapTier}` : ''}`;
+  const E = effective();
+  let title;
+  if (E.source === 'rewardChest') { const f = FINISH[E.finishRar]; title = `Reward room · ${RAR_NAME[f.id] || pretty(f.id)} finish · ${f.chests} chests`; }
+  else if (E.source === 'mapChest') title = `Map chest · Lv ${E.mobLevel} · Map T${E.mapTier}`;
+  else if (E.source === 'worldChest') title = `Chest · Lv ${E.mobLevel}`;
+  else title = `${MOB_NAME[E.mobRar]} mob · Lv ${E.mobLevel}${E.inMap ? ` · Map T${E.mapTier}` : ''}`;
+  $('#mobTitle').textContent = title;
+  const n = E.source === 'rewardChest' ? FINISH[E.finishRar].chests : 1;
+  $('#pull small').textContent = E.chest ? `open ${n} chest${n === 1 ? '' : 's'}` : 'kill 1 mob';
+  $('#bossLabel').hidden = $('#bossReels').hidden = !!E.chest;
+  $('#bonusLabel').hidden = $('#bonusReels').hidden = !!E.chest;
   buildReels();
   renderOdds();
 }
@@ -901,12 +1173,22 @@ function reelHtml(g) {
 function buildReels() {
   $('#reels').innerHTML = GENS.map(reelHtml).join('');
   $('#bonusReels').innerHTML = SPECIAL_GENS.map(reelHtml).join('');
+  $('#bossReels').innerHTML = BOSS_GENS.map(bossReelHtml).join('');
+}
+
+function bossReelHtml(g) {
+  const res = bossRewards(effective(), CFG); // cheap; only used for the gate and chance labels
+  const row = res.rows.find(r => r.g.key === g.key);
+  const lbl = g.key === 'relic' ? (row.gate ? 'locked' : `${fmt(row.chance / 100, 2)} avg`) : pct(Math.min(row.chance, 100), 1);
+  return `<div class="reel ${row.gate ? 'locked' : ''}" data-gen="${g.key}" title="${esc(g.label)}${row.gate ? ' — ' + esc(row.gate) : ''}">
+    <div class="sym">${img(g.icon, 'reel-ico')}</div><div class="num">${row.gate ? '🔒' : '–'}</div>
+    <div class="name">${esc(g.label)}</div><div class="chance">${row.gate ? 'locked' : lbl}</div></div>`;
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function animateReels(res, fast) {
-  const rows = [...res.rows, ...res.specialRows];
+  const rows = res.chest ? res.rows : [...res.rows, ...res.specialRows, ...res.bossRows];
   const reels = rows.map(r => $(`.reel[data-gen="${r.g.key}"]`));
   if (fast) { rows.forEach((r, i) => landReel(reels[i], r)); return; }
   const machine = $('.machine');
@@ -939,11 +1221,11 @@ function landReel(el, row) {
 
 function itemHtml(it, i = 0) {
   const cls = ['item', 'rar-' + (RARS.includes(it.rar) ? it.rar : 'other')];
-  if (it.special) cls.push('special');
+  if (it.special || it.boss) cls.push('special');
   if (it.announce) cls.push('announce');
   if (it.removed) cls.push('removed');
   return `<div class="${cls.join(' ')}" style="animation-delay:${Math.min(i * 40, 900)}ms" title="${esc(GEN_BY_KEY[it.gen].label)}">
-    <span class="ic">${img(it.icon)}</span><span><span class="t">${esc(it.name)}</span>${it.detail ? `<br><span class="d">${esc(it.detail)}${it.special ? ' · bonus pool' : ''}${it.announce ? ' · 📣 announced' : ''}</span>` : (it.special ? '<br><span class="d">bonus pool</span>' : '')}</span></div>`;
+    <span class="ic">${img(it.icon)}</span><span><span class="t">${esc(it.name)}</span>${it.detail ? `<br><span class="d">${esc(it.detail)}${it.special ? ' · bonus pool' : ''}${it.boss ? ' · boss reward' : ''}${it.announce ? ' · 📣 announced' : ''}</span>` : (it.special ? '<br><span class="d">bonus pool</span>' : '')}</span></div>`;
 }
 
 let SESSION = { kills: 0, items: 0, best: null };
@@ -951,17 +1233,24 @@ const RANK = { common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4, other: 1,
 
 function renderTray(res) {
   const loot = $('#loot');
-  loot.innerHTML = res.final.length ? res.final.map(itemHtml).join('') : '<p class="empty">Nothing dropped. That\'s most kills.</p>';
+  if (res.chest) {
+    loot.innerHTML = res.chests.map(c => {
+      const items = [...c.core.final, ...c.vItems];
+      return `<div class="chest-box"><h3>${img(IT.chest.common, 'ico sm')} Chest ${c.idx + 1}<small>${c.table ? esc(tableLabel(c.table)) : 'Mine and Slash roll only'}</small></h3>
+        <div class="loot">${items.length ? items.map(itemHtml).join('') : '<p class="empty">Empty.</p>'}</div>
+        ${c.lost.length ? `<p class="note">${c.lost.length} vanilla stack${c.lost.length === 1 ? '' : 's'} didn't fit in the 27 slots and were thrown away.</p>` : ''}</div>`;
+    }).join('');
+  } else loot.innerHTML = res.final.length ? res.final.map(itemHtml).join('') : '<p class="empty">Nothing dropped. That\'s most kills.</p>';
   $('#trayCount').textContent = `${res.final.length} item${res.final.length === 1 ? '' : 's'}${res.removed.length ? ` · ${res.removed.length} discarded by the cap` : ''}`;
   $('#discarded').innerHTML = res.removed.length
-    ? `<h3>Randomly removed to get down to ${CFG.server.maxItems} items</h3><div class="loot">${res.removed.map(itemHtml).join('')}</div>` : '';
+    ? `<h3>Randomly removed to get down to ${res.chest ? CHEST_MAX_ITEMS + ' items per chest' : CFG.server.maxItems + ' items'}</h3><div class="loot">${res.removed.map(itemHtml).join('')}</div>` : '';
 }
 
 function updateSession(res) {
   SESSION.kills++;
   SESSION.items += res.final.length;
-  for (const it of res.final) if (!SESSION.best || RANK[it.rar] > RANK[SESSION.best.rar]) SESSION.best = it;
-  $('#session').innerHTML = `Session: <b>${SESSION.kills}</b> kills · <b>${SESSION.items}</b> items${SESSION.best ? ` · best: <span class="rc rar-${RARS.includes(SESSION.best.rar) ? SESSION.best.rar : 'other'}">${esc(SESSION.best.name)}</span>` : ''}`;
+  for (const it of res.final.filter(x => !x.vanilla)) if (!SESSION.best || RANK[it.rar] > RANK[SESSION.best.rar]) SESSION.best = it;
+  $('#session').innerHTML = `Session: <b>${SESSION.kills}</b> pulls · <b>${SESSION.items}</b> items${SESSION.best ? ` · best: <span class="rc rar-${RARS.includes(SESSION.best.rar) ? SESSION.best.rar : 'other'}">${esc(SESSION.best.name)}</span>` : ''}`;
 }
 
 // ---------------------------------------------------------------- UI: steps
@@ -973,14 +1262,14 @@ function stepCard(n, title, summary, body, open = false) {
 function chipsHtml(row) {
   if (!row.chunks.length) return '<span class="chip gate">0% — never rolls</span>';
   const show = row.chunks.length > 24 ? row.chunks.slice(0, 24) : row.chunks;
-  let h = show.map(c => `<span class="chip ${c.ok ? 'ok' : 'no'}" title="rolled ${fmt(c.r, 2)} vs ${fmt(c.c, 3)}">${fmt(c.c, c.c < 1 ? 3 : 1)}% ${c.ok ? '✓' : '✗'}</span>`).join('');
+  let h = show.map(c => `<span class="chip ${c.ok ? 'ok' : 'no'}" title="rolled ${fmt(c.r, 2)} vs ${fmt(c.c, 3)}">${c.dupe ? 'dupe ' : ''}${fmt(c.c, c.c < 1 ? 3 : 1)}% ${c.ok ? '✓' : '✗'}</span>`).join('');
   if (row.chunks.length > 24) h += `<span class="chip gate">+${row.chunks.length - 24} more</span>`;
   return `<div class="chips">${h}</div>`;
 }
 
 function rollTable(rows, special) {
   const body = rows.map(r => {
-    const calc = r.steps.map((st, i) => i === 0 ? fmt(st.v, 3) : `<span title="${esc(st.label)}">× ${fmt(st.v, 3)}</span>`).join(' ');
+    const calc = r.steps.map((st, i) => i === 0 ? fmt(st.v, 3) : `<span title="${esc(st.label)}">${st.label.startsWith('+') ? '+' : '×'} ${fmt(st.v, 3)}</span>`).join(' ');
     let res = `<b>${r.items.length}</b>`;
     if (r.gate && r.amount) res = `<span class="bad" title="${esc(r.gate)}">${r.amount} → 0</span>`;
     else if (r.failed) res = `<span class="bad" title="${esc(r.failed)}">${r.amount} → 0</span>`;
@@ -1022,6 +1311,50 @@ function G_ratioText(u) {
 }
 
 function renderSteps(res) {
+  if (res.chest) { $('#tab-steps').innerHTML = chestStepsHtml(res); return; }
+  $('#tab-steps').innerHTML = coreStepsHtml(res).join('');
+}
+
+function chestStepsHtml(res) {
+  const s = res.s;
+  const src = s.source === 'rewardChest'
+    ? (() => { const f = FINISH[s.finishRar]; return `A <b>${RAR_NAME[f.id] || pretty(f.id)}</b> map finish (${f.pct}%+ of the map's mobs killed) spawns <b>${f.chests}</b> reward chests using <code>${esc(f.table)}</code>, and adds <b>×${f.multi}</b> to the Mine and Slash roll.`; })()
+    : s.source === 'mapChest' ? 'A normal chest inside a map uses one of the five <code>dungeon_realm:chests/tier_N_dungeon</code> tables, picked uniformly.'
+      : "A chest outside maps uses whatever loot table its structure has. That part isn't modelled; only the Mine and Slash roll is.";
+  const intro = `<div class="step"><div class="body" style="padding-top:12px">
+    <p>${src}</p>
+    <p>Opening a chest runs the same Mine and Slash loot roll as a mob kill (<code>OnLootChestEvent</code>), but with chest rules: <b>max ${CHEST_MAX_ITEMS} items</b>, a <b>×${s.inMap ? 10 : 5} chest</b> modifier and no mob modifiers. No bonus pool (it needs a mob) and no boss rewards. Those items go in first, then the vanilla table fills the free slots.</p></div></div>`;
+  const per = res.chests.map(c => {
+    const vt = c.vanilla.length
+      ? `<div class="loot">${c.vItems.map(itemHtml).join('')}</div>${c.lost.length ? `<p class="note">${c.lost.length} stack(s) didn't fit and were discarded.</p>` : ''}`
+      : '<p class="muted">No vanilla loot table modelled for this chest.</p>';
+    const steps = coreStepsHtml(c.core, true);
+    steps.push(stepCard(5, 'Vanilla loot table', c.table ? `${c.vanilla.length} stack${c.vanilla.length === 1 ? '' : 's'}` : 'not modelled',
+      `${c.table ? `<p><code>${esc(c.table)}</code>: every pool rolls its count, then picks weighted entries. Nested tables roll the same way.</p>${lootTableHtml(c.table)}` : ''}${vt}`));
+    return `<details class="step chest-steps" ${c.idx === 0 ? 'open' : ''}><summary><span class="n">${c.idx + 1}</span><span class="st">Chest ${c.idx + 1} · ${esc(c.table ? tableLabel(c.table) : 'Mine and Slash roll')}</span><span class="sum">${c.core.final.length} M&amp;S + ${c.vItems.length} vanilla</span></summary><div class="body">${steps.join('')}</div></details>`;
+  }).join('');
+  return intro + per;
+}
+
+function lootTableHtml(id, depth = 0) {
+  const t = POOLS.lootTables[id];
+  if (!t) return '<p class="muted">Table not found.</p>';
+  const rng = v => { if (typeof v === 'number') return String(v); if (!v) return '1'; if (v.min !== undefined) return v.min === v.max ? String(v.min) : `${v.min}–${v.max}`; if (v.value !== undefined) return String(v.value); return '?'; };
+  return (t.pools || []).map((pool, i) => {
+    const tot = (pool.entries || []).reduce((a, e) => a + (e.weight ?? 1), 0) || 1;
+    const rows = (pool.entries || []).map(e => {
+      const w = e.weight ?? 1;
+      const cnt = (e.functions || []).find(f => f.function === 'minecraft:set_count');
+      const info = e.type === 'minecraft:item' ? (POOLS.lootItems[e.name] || { name: e.name }) : null;
+      const label = e.type === 'minecraft:empty' ? '<i>nothing</i>' : e.type === 'minecraft:loot_table' ? `table <code>${esc(e.name)}</code>` : `${img(info.icon, 'ico sm')} ${esc(info.name)}`;
+      return `<tr><td class="tn">${label}${(e.functions || []).some(f => f.function.includes('enchant')) ? ' <small>(enchanted)</small>' : ''}</td><td class="num">${cnt ? '×' + rng(cnt.count) : ''}</td><td class="num">${pct(w / tot * 100, 1)}</td></tr>`
+        + (e.type === 'minecraft:loot_table' && depth < 1 ? `<tr><td colspan="3" style="padding-left:24px">${lootTableHtml(e.name, depth + 1)}</td></tr>` : '');
+    }).join('');
+    return `<table class="lt"><thead><tr><th>Pool ${i + 1} · ${rng(pool.rolls)} roll${rng(pool.rolls) === '1' ? '' : 's'}</th><th class="num">Count</th><th class="num">Per roll</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }).join('');
+}
+
+function coreStepsHtml(res, chestMode = false) {
   const s = res.s;
   const out = [];
   // 1 modifiers
@@ -1049,12 +1382,15 @@ function renderSteps(res) {
     `<p>Items with a rarity roll it from the weight table, then get <b>one</b> chance to go up exactly one tier: <code>chance = MF × (higher weight ÷ current weight)</code>. There's never a +2 jump, and Unique/Runed aren't upgrade targets. Magic find instead multiplies their weight by <code>1 + MF/200</code>.</p>${itemsBody}`, all.length > 0 && all.length <= 6));
 
   // 4 cap
-  out.push(stepCard(4, `Cap at ${CFG.server.maxItems} items`, res.removed.length ? `${res.beforeCap.length} → ${res.beforeCap.length - res.removed.length} (${res.removed.length} removed)` : `${res.beforeCap.length} ≤ ${CFG.server.maxItems}, nothing removed`,
+  const cap = res.maxItems;
+  out.push(stepCard(4, `Cap at ${cap} items`, res.removed.length ? `${res.beforeCap.length} → ${res.beforeCap.length - res.removed.length} (${res.removed.length} removed)` : `${res.beforeCap.length} ≤ ${cap}, nothing removed`,
     res.removed.length
-      ? `<p>${res.beforeCap.length} items rolled. Random items are removed one at a time until ${CFG.server.maxItems} are left. Every item has the same odds of being removed, rarity doesn't matter.</p>
-         ${res.beforeCap.length - res.removed.length > CFG.server.maxItems ? `<p class="note"><b>The cap gave up.</b> The mod's removal loop stops after 50 tries, so a kill that rolls more than ${CFG.server.maxItems + 50} items keeps everything past that: ${res.beforeCap.length - res.removed.length} items stay here.</p>` : ''}
+      ? `<p>${res.beforeCap.length} items rolled. Random items are removed one at a time until ${cap} are left. Every item has the same odds of being removed, rarity doesn't matter.</p>
+         ${res.beforeCap.length - res.removed.length > cap ? `<p class="note"><b>The cap gave up.</b> The mod's removal loop stops after 50 tries, so a roll of more than ${cap + 50} items keeps everything past that: ${res.beforeCap.length - res.removed.length} items stay here.</p>` : ''}
          <div class="loot">${res.removed.map(itemHtml).join('')}</div>`
-      : `<p>${res.beforeCap.length} items, under the cap of ${CFG.server.maxItems}. The cap only matters on high-multiplier kills (bosses, lots of Item Find, parties).${CFG.server.minItems > 0 ? ` The min-items floor is ${CFG.server.minItems}${res.fillers.length ? `, and it added ${res.fillers.length} filler item(s)` : ''}.` : ''}</p>`));
+      : `<p>${res.beforeCap.length} items, under the cap of ${cap}. The cap only matters on high-multiplier kills (bosses, lots of Item Find, parties).${CFG.server.minItems > 0 ? ` The min-items floor is ${CFG.server.minItems}${res.fillers.length ? `, and it added ${res.fillers.length} filler item(s)` : ''}.` : ''}</p>`));
+
+  if (chestMode) return out; // chests have no bonus pool (it needs a mob) and no boss rewards
 
   // 5 special
   const sp = res.specialRows.reduce((a, r) => a + r.items.length, 0);
@@ -1063,12 +1399,26 @@ function renderSteps(res) {
      ${rollTable(res.specialRows, true)}
      <p class="note">Abyssal Eye (the Watcher's Eye jewel): uber bosses only. Pinnacle Gem: pinnacle bosses only; at 100% it rolls 75% + 25%, so 0, 1 or 2 gems (1 on average).</p>`));
 
+  if (chestMode) return out;
+
   // 6 final
   const ann = res.final.filter(x => x.announce);
-  out.push(stepCard(6, 'Drop on the ground', `${res.final.length} item${res.final.length === 1 ? '' : 's'}${ann.length ? ` · ${ann.length} announced` : ''}`,
+  const bk = bossKind(s);
+  const bn = res.bossRows.reduce((a, r) => a + r.items.length, 0);
+  out.push(stepCard(6, 'Dungeon Realm boss rewards: relics, fragments, boss map', bk ? `${bn} reward${bn === 1 ? '' : 's'}` : 'not a boss',
+    `<p>Dungeon Realm drops these itself when a dungeon boss dies. They're separate from all the rolls above: no loot modifiers and no item cap.</p>
+     ${rollTable(res.bossRows, true)}
+     <ul class="muted small">
+       <li><b>Relics:</b> uber and pinnacle bosses drop 3, the map's final boss 1. Each one gets an extra roll at your Relic Find %. Rarity and type are weighted from the pack's relic data.</li>
+       <li><b>${esc(IT.uberFrag.name)}:</b> final map boss only. One roll: <code>UBER_FRAG_DROP_RATE × (1 + relic %) × (1 + Uber Fragment Find %)</code>, so at most 1.</li>
+       <li><b>${esc(IT.pinnacleFrag.name)}:</b> guaranteed from an uber boss (not a pinnacle boss) if anyone in the arena has unlocked Pinnacle on the atlas.</li>
+       <li><b>Boss map:</b> final map boss only. <code>MAP_ITEM_FROM_BOSS_BASE_CHANCE</code> plus the relic stat; each full 100% is a guaranteed map and the rest is rolled. It uses the boss tier band (never below the run's tier). Then Duplicate Map Chance can drop a copy of the map you ran.</li>
+     </ul>`));
+
+  out.push(stepCard(7, 'Drop on the ground', `${res.final.length} item${res.final.length === 1 ? '' : 's'}${ann.length ? ` · ${ann.length} announced` : ''}`,
     `<p>Everything left spawns at the mob. Unique and Mythic drops are announced in chat (<code>ItemUtils.tryAnnounceItem</code>), and uniques play a ding.</p>`));
 
-  $('#tab-steps').innerHTML = out.join('');
+  return out;
 }
 
 // ---------------------------------------------------------------- UI: odds sheet (analytic)
@@ -1089,6 +1439,29 @@ function rarityDistribution(kind, s, cfg) {
     p[r] -= p0[r] * u; p[h] += p0[r] * u;
   }
   return { p0, p, possible };
+}
+
+function chestOddsHtml(s) {
+  const n = s.source === 'rewardChest' ? FINISH[s.finishRar].chests : 1;
+  const tables = s.source === 'rewardChest' ? [FINISH[s.finishRar].table] : s.source === 'mapChest' ? [1, 2, 3, 4, 5].map(i => `dungeon_realm:chests/tier_${i}_dungeon`) : [];
+  return `<h3>Chests</h3><p>The figures above are <b>per chest</b> (max ${CHEST_MAX_ITEMS} Mine and Slash items each). This pull opens <b>${n}</b> chest${n === 1 ? '' : 's'}, so multiply by ${n}.${s.source === 'mapChest' ? ' Map chests pick one of these five tables at random:' : ''}</p>
+    ${tables.map(t => `<details class="step"><summary><span class="st">${esc(tableLabel(t))}</span><span class="sum"><code>${esc(t)}</code></span></summary><div class="body">${lootTableHtml(t)}</div></details>`).join('')}`;
+}
+
+function bossOddsHtml(s, cfg) {
+  const kind = bossKind(s);
+  const rf = Math.min(s.find_relic || 0, 100) / 100;
+  const frag = Math.min(cfg.rates.uberFrag * (1 + (s.relic_bossfrag || 0) / 100) * (1 + (s.find_uberfrag || 0) / 100), 100);
+  const mapCh = cfg.rates.bossMap + (s.relic_bossmap || 0);
+  const rows = [
+    ['relic', kind === 'uber' || kind === 'pinnacle' ? 3 * (1 + rf) : kind === 'final' ? 1 + rf : 0, 'map final boss, uber or pinnacle boss'],
+    ['uberFrag', kind === 'final' ? frag / 100 : 0, "map's final boss", frag],
+    ['pinnacleFrag', kind === 'uber' && s.pinnacleUnlocked ? 1 : 0, 'uber boss + Pinnacle unlocked', 100],
+    ['bossMap', kind === 'final' ? mapCh / 100 + Math.min(s.dupeMap || 0, 100) / 100 : 0, "map's final boss", mapCh],
+  ];
+  return `<h3>Dungeon Realm boss rewards</h3><table><thead><tr><th>Reward</th><th class="num">Chance</th><th class="num">Expected / kill</th><th>When</th></tr></thead><tbody>${
+    rows.map(([k, e, when, ch]) => `<tr class="${e ? '' : 'dim'}"><td class="tn">${img(GEN_BY_KEY[k].icon, 'ico sm')} ${esc(GEN_BY_KEY[k].label)}</td><td class="num">${ch !== undefined ? pct(Math.min(ch, k === 'bossMap' ? Infinity : 100), 1) : '—'}</td><td class="num">${fmt(e, 3)}</td><td><small>${esc(when)}</small></td></tr>`).join('')
+  }</tbody></table>`;
 }
 
 function renderOdds() {
@@ -1126,13 +1499,14 @@ function renderOdds() {
   $('#tab-odds').innerHTML = `
     <p>Exact odds for the current scenario, worked out from the formulas instead of sampled. Change anything on the left and this updates.</p>
     <div class="kpis">
-      <div class="kpi"><b>${fmt(exp, 3)}</b><span>expected normal drops per kill</span></div>
+      <div class="kpi"><b>${fmt(exp, 3)}</b><span>expected normal drops per ${s.chest ? 'chest' : 'kill'}</span></div>
       <div class="kpi"><b>${pct((1 - pNone) * 100)}</b><span>chance of at least one normal drop</span></div>
       <div class="kpi"><b>×${fmt(mods.product, 3)}</b><span>loot modifier product</span></div>
       <div class="kpi"><b>${fmt(Math.min(s.mf, cfg.server.mfCap), 0)}</b><span>effective magic find${s.mf > cfg.server.mfCap ? ` (capped from ${s.mf})` : ''}</span></div>
     </div>
     <h3>Per drop type</h3>
     <table><thead><tr><th>Type</th><th class="num">Base</th><th class="num">Modifiers</th><th class="num">Final chance</th><th class="num">Expected / kill</th><th class="num">≥1 drop</th><th class="num">Roughly</th></tr></thead><tbody>${rows}</tbody></table>
+    ${s.chest ? chestOddsHtml(s) : bossOddsHtml(s, cfg)}
     <p class="note">Expected drops per kill are exactly <code>chance ÷ 100</code>. The 75% chunking changes the spread (how often you get 0, 1, 2…), not the average. Watch the 20-item cap at very high chances, though.</p>
     <h3>Magic find upgrade chance per step</h3>
     <table><thead><tr><th>Step</th><th class="num">Weight ratio</th><th class="num">50 MF</th><th class="num">100 MF</th><th class="num">150 MF</th><th class="num">Your MF</th><th class="num">Needs</th></tr></thead><tbody>${ratioRows}</tbody></table>
@@ -1151,7 +1525,7 @@ function runBulk(n) {
   out.innerHTML = '<p class="muted">Simulating…</p>';
   setTimeout(() => {
     const t0 = performance.now();
-    const byGen = Object.fromEntries(ALL_GENS.map(g => [g.key, 0]));
+    const byGen = Object.fromEntries([...ALL_GENS, ...BOSS_GENS, VANILLA_GEN].map(g => [g.key, 0]));
     const byRar = Object.fromEntries([...RARS, 'other'].map(r => [r, 0]));
     const gearRar = Object.fromEntries(RARS.map(r => [r, 0]));
     let total = 0, capped = 0, removed = 0, empty = 0, maxDrop = 0;
@@ -1169,7 +1543,7 @@ function runBulk(n) {
       }
     }
     const ms = performance.now() - t0;
-    const genRows = ALL_GENS.filter(g => byGen[g.key]).map(g => `<tr><td class="tn">${img(g.icon, 'ico sm')} ${esc(g.label)}</td><td class="num">${byGen[g.key].toLocaleString()}</td><td class="num">${fmt(byGen[g.key] / n, 4)}</td><td class="barcell"><div class="bar" style="width:${byGen[g.key] / Math.max(...Object.values(byGen)) * 100}%"></div></td></tr>`).join('');
+    const genRows = [...ALL_GENS, ...BOSS_GENS, VANILLA_GEN].filter(g => byGen[g.key]).map(g => `<tr><td class="tn">${img(g.icon, 'ico sm')} ${esc(g.label)}</td><td class="num">${byGen[g.key].toLocaleString()}</td><td class="num">${fmt(byGen[g.key] / n, 4)}</td><td class="barcell"><div class="bar" style="width:${byGen[g.key] / Math.max(...Object.values(byGen)) * 100}%"></div></td></tr>`).join('');
     const gTot = Object.values(gearRar).reduce((a, b) => a + b, 0) || 1;
     const rarRows = RARS.filter(r => gearRar[r]).map(r => `<tr><td class="rc rar-${r}">${RAR_NAME[r]}</td><td class="num">${gearRar[r].toLocaleString()}</td><td class="num">${pct(gearRar[r] / gTot * 100)}</td><td class="barcell"><div class="bar" style="--c:var(--r-${r});width:${gearRar[r] / gTot * 100}%"></div></td></tr>`).join('');
     const top = Object.entries(named).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([k, v]) => `<tr><td class="rc rar-unique">${esc(k)}</td><td class="num">${v}</td></tr>`).join('');
@@ -1224,6 +1598,10 @@ function renderRules() {
       <ul><li><span class="new">EXTRA</span> The removal loop gives up after 50 tries, so a kill that rolls more than 70 items (big bosses with lots of Item Find) keeps everything past 70.</li></ul></li>
     <li><h4>Bonus pool: Abyssal Eye &amp; Pinnacle Gems</h4>
       <p>Rolled <b>after</b> the cap, so they're never removed. The loot modifier product isn't applied, only their own find stat and map relics. Abyssal Eye (the mod's Watcher's Eye): uber bosses only, 1/2/3 aura affixes at level 50/75/100 (it fails below 50). Pinnacle Gem: pinnacle bosses only, 100% → 75% + 25%, so up to 2.</p></li>
+    <li><h4>Dungeon Realm boss rewards <span class="new">EXTRA</span></h4>
+      <p>A separate hook in Dungeon Realm, not part of the loot above, so no loot modifiers and no item cap. Relics: 3 from uber and pinnacle bosses and 1 from the map's final boss, each with a Relic Find roll for one more. Uber Fragment: final map boss only, one roll of the base rate × (1 + relic %) × (1 + Uber Fragment Find %). Pinnacle Fragment: guaranteed from uber bosses once anyone in the arena has unlocked Pinnacle. Boss map: final map boss, base chance plus relic %, never below the run's tier. Duplicate map: a copy of the map you ran, at your Duplicate Map Chance.</p></li>
+    <li><h4>Chests <span class="new">EXTRA</span></h4>
+      <p>Opening any vanilla chest runs the same roll with chest rules: at most 7 items, ×10 inside maps (×5 outside), no mob modifiers, no bonus pool and no boss rewards. Map chests use one of the five Dungeon Realm tier tables at random. The reward room spawns 2–4 chests depending on your map finish rarity, each using that rarity's loot table plus its <code>mns_loot_multi</code> (×1 to ×4.75 in CTE2). Mine and Slash items go into the empty chest first, then the vanilla table fills the free slots; vanilla stacks that don't fit are lost.</p></li>
     <li><h4>Announce</h4>
       <p>Unique and Mythic drops are announced in chat, and uniques play a ding.</p></li>
   </ol>

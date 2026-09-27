@@ -1,6 +1,6 @@
 # CTE2 Drop Machine
 
-A slot machine that shows how mob drops work in Craft to Exile 2 (Mine and Slash). Kill a mob, then follow every step
+A slot machine that shows how mob and chest drops work in Craft to Exile 2 (Mine and Slash). Kill a mob, then follow every step
 of the roll: the loot modifiers, the independent roll for each drop type (at most 75% per roll), rarity weights and the
 Magic Find upgrade, the 20-item cap, and the bonus pool (Abyssal Eye, Pinnacle Gems). It also has an odds sheet, a bulk
 simulator and the atlas passive tree.
