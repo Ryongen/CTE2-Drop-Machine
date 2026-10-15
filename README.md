@@ -5,6 +5,8 @@ of the roll: the loot modifiers, the independent roll for each drop type (at mos
 Magic Find upgrade, the 20-item cap, and the bonus pool (Abyssal Eye, Pinnacle Gems). It also has an odds sheet, a bulk
 simulator and the atlas passive tree.
 
+The website now counts how many people use it each day.
+
 ## Use it locally
 
 It's a static page with no build step.

@@ -122,6 +122,31 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
 };
 
+// ---------------------------------------------------------------- usage counts
+// Anonymous: which parts of the page get used, never who uses them. A count is the tool and an event name, nothing
+// else (no cookies, no ids), sent to the CTE2 Archives Worker, which keeps one number per day, tool and event. Its
+// src/usage.ts lists the events it accepts, so a new one here needs adding there too. Only the live site counts.
+
+const USAGE_URL = 'https://cob-codex-api.ryongenn.workers.dev/usage';
+const USAGE_LIVE = location.hostname === 'ryongen.github.io';
+const usageSent = new Set();
+// once per page load per event, fire and forget
+function countUsage(event) {
+  if (!USAGE_LIVE || usageSent.has(event)) return;
+  usageSent.add(event);
+  fetch(`${USAGE_URL}?tool=drop-machine&event=${event}`, { method: 'POST', mode: 'no-cors' }).catch(() => {});
+}
+// `open` every page load, `day` once per browser per day (roughly people)
+function countVisit() {
+  countUsage('open');
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    if (localStorage.getItem('cte2dm.usageDay') === today) return;
+    localStorage.setItem('cte2dm.usageDay', today);
+  } catch { return; }
+  countUsage('day');
+}
+
 let CFG = store.get('cte2dm.cfg') || clone(PRESETS.pack);
 if (!CFG.name) CFG = clone(PRESETS.pack);
 // settings saved by an older version may lack newer keys: fill them from the pack preset
@@ -1090,6 +1115,7 @@ function initAtlas() {
 let atlasBuilt = false;
 function openAtlas() {
   if (!ATLAS) return;
+  countUsage('atlas');
   if (!atlasBuilt) buildAtlasSvg();
   refreshAtlas();
   $('#atlasDlg').showModal();
@@ -1520,6 +1546,7 @@ function renderOdds() {
 // ---------------------------------------------------------------- UI: bulk test
 
 function runBulk(n) {
+  countUsage('bulk');
   const out = $('#bulkOut');
   out.innerHTML = '<p class="muted">Simulating…</p>';
   setTimeout(() => {
@@ -1662,6 +1689,7 @@ let busy = false;
 async function pull(fast) {
   if (busy) return;
   busy = true;
+  countUsage('pull');
   $('#pull').disabled = true; $('#pull10').disabled = true;
   const res = simulateKill(effective(), CFG);
   await animateReels(res, fast);
@@ -1674,6 +1702,7 @@ async function pull(fast) {
 }
 
 function init() {
+  countVisit();
   buildScenario();
   onScenarioChange();
   renderRules();
@@ -1685,6 +1714,7 @@ function init() {
     for (let i = 0; i < 10; i++) { await pull(true); await sleep(120); }
   });
   $$('.tabs button').forEach(b => b.addEventListener('click', () => {
+    if (b.dataset.tab !== 'steps') countUsage('tab-' + b.dataset.tab); // steps is where every load starts
     $$('.tabs button').forEach(x => x.classList.toggle('active', x === b));
     $$('.tab-body').forEach(t => { t.hidden = t.id !== 'tab-' + b.dataset.tab; });
   }));
